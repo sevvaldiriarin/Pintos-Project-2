@@ -18,8 +18,14 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define MAX_ARGS 32
+#define MAX_ARG_LEN 128
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+//static char* parse_arguments(char *cmd_string, char *argv[], int *argc);
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -38,8 +44,25 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  // PARSING THE FILE NAME
+  // we don't have to parse the arguments here because
+  // we only need to pass the file name to the thread in
+  // it's creation process.
+  // we will need to parse the arguments while putting them 
+  // onto the stack
+  char *fname_ext = malloc(strlen(file_name) + 1); 
+  strlcpy(fname_ext, file_name, strlen(file_name) + 1);  // to avoid modifying the original
+  char *save_ptr;
+  char* fname_ext = strtok_r(fname_ext," ", &save_ptr);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  // tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  
+  // The current PINTOS passes the whole command line as a name argument to the thread. 
+  // We have to parse the command line, and pass only the name.
+
+  tid = thread_create (fname_ext, PRI_DEFAULT, start_process, fn_copy);
+  free(fname_ext); // NEWLY ADDED
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -131,7 +154,7 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
+
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 
@@ -214,6 +237,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+  
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -221,11 +245,19 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+  // FOR PARSING THE FILE NAME
+  // the same process as process_execute()
+  char *fname_ext = malloc(strlen(file_name) + 1); 
+  strlcpy(fname_ext, file_name, strlen(file_name) + 1);  // to avoid modifying the original
+  char *save_ptr;
+  char* fname_ext = strtok_r(fname_ext," ", &save_ptr);
+  
   /* Open executable file. */
-  file = filesys_open (file_name);
+  // file = filesys_open (file_name); // Have to change it, because we should parse the file name first
+  file = filesys_open (fname_ext); // NEWLY ADDED
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", fname_ext);
       goto done; 
     }
 
@@ -238,10 +270,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      // printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", fname_ext); // NOT SURE!!
       goto done; 
     }
 
+  free(fname_ext); // NEWLY ADDED
+  
+  
   /* Read program headers. */
   file_ofs = ehdr.e_phoff;
   for (i = 0; i < ehdr.e_phnum; i++) 
@@ -311,11 +347,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
  done:
+ 
+ // TO DO: If success deny writing to executables
+ 
   /* We arrive here whether the load is successful or not. */
   file_close (file);
   return success;
 }
-
+
 /* load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);
@@ -463,3 +502,18 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
+/*
+static char *
+parse_arguments(char *cmd_string, char *argv[], int *argc)
+{
+  char *save_ptr;
+  char *command_name = strtok_r(cmd_string, " ", &save_ptr);
+  char *token;
+  *argc = 0;
+  while ((token = strtok_r(NULL, " ", &save_ptr)) != NULL)
+  {
+    argv[(*argc)++] = token;
+  }
+  return command_name;
+}*/
