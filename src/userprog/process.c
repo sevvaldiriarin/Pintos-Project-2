@@ -18,6 +18,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#include "threads/malloc.h"
+
 #define MAX_ARGS 32
 #define MAX_ARG_LEN 128
 
@@ -53,7 +55,7 @@ process_execute (const char *file_name)
   char *fname_ext = malloc(strlen(file_name) + 1); 
   strlcpy(fname_ext, file_name, strlen(file_name) + 1);  // to avoid modifying the original
   char *save_ptr;
-  char* fname_ext = strtok_r(fname_ext," ", &save_ptr);
+  fname_ext = strtok_r(fname_ext," ", &save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   // tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -76,13 +78,25 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  
+  // FOR PARSING THE FILE NAME
+  // the same process of parsing in process_execute()
+  char *fname_ext = malloc(strlen(file_name) + 1); 
+  strlcpy(fname_ext, file_name, strlen(file_name) + 1);  // to avoid modifying the original
+  char *save_ptr;
+  fname_ext = strtok_r(fname_ext," ", &save_ptr);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  // success = load (file_name, &if_.eip, &if_.esp);
+  success = load (fname_ext, &if_.eip, &if_.esp); // NEWLY ADDED
+  free(fname_ext); // NEWLY ADDED
+  
+  // SETTING UP THE STACK
+  
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -218,7 +232,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, char * file_name);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -250,7 +264,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   char *fname_ext = malloc(strlen(file_name) + 1); 
   strlcpy(fname_ext, file_name, strlen(file_name) + 1);  // to avoid modifying the original
   char *save_ptr;
-  char* fname_ext = strtok_r(fname_ext," ", &save_ptr);
+  fname_ext = strtok_r(fname_ext," ", &save_ptr);
   
   /* Open executable file. */
   // file = filesys_open (file_name); // Have to change it, because we should parse the file name first
@@ -338,7 +352,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  // have to change the code here because we will need to 
+  // put the arguments that we get from the command line
+  // into the stack
+  //if (!setup_stack (esp))
+  if (!setup_stack (esp, file_name))  // NEWLY ADDED
     goto done;
 
   /* Start address. */
@@ -466,20 +484,96 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, char * file_name) 
 {
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  // if PAL_USER = 1, page is obtained from user pool, otherwise
+  // from the kernel pool, if PAL_ZERO is set the page is filled 
+  // with zeros
+  kpage = palloc_get_page (PAL_USER | PAL_ZERO); 
   if (kpage != NULL) 
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+      // Adds a mapping from user virtual address UPAGE to kernel
+      // virtual address KPAGE to the page table.
+      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true); 
       if (success)
         *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
+    
+  // PARSING THE ARGS AND PUSHING THEM ONTO THE STACK
+  char* fn_cpy = malloc(strlen(file_name)+1);
+  strlcpy(fn_cpy, file_name, strlen(file_name)+1);
+  
+  char *token, *save_ptr;
+  int argc, i = 0;
+  
+  // first we have to calculate the argc becuase according to the
+  // PINTOS 80x86 calling converntion, we have to push the arguments
+  // to the stack from right to left.
+  for(token = strtok_r(fn_cpy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)){
+    	argc++;
+  }
+  
+  // pushing the arguments
+  // we don't have to create a copy of the command line arguments
+  // because we won't need them again
+  int *argv = calloc(argc, sizeof(int)); // type int * --> address of the arguments are int
+  for(token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr), i++){
+  	*esp -= strlen(token) + 1;
+  	memcpy(*esp, token, strlen(token) +1); // copying the strings to the stack, order doesn't matter
+  	argv[i] = *esp; // to access the strings
+  }
+  
+  // to align the stack
+  while(((int)*esp%4) != 0){
+  	char x = 0;
+  	*esp -= sizeof(char);
+  	memcpy(*esp, &x, sizeof(char)); // zero-padding
+  }
+  
+  /*
+  // 32-bit zero padding
+  int padding = 0;
+  *esp -= sizeof(padding);
+  memcpy(*esp, &padding, sizeof(int)); // zero-padding
+  */
+  
+  
+  int zeros = 0; // defined here, because it's going to be used later
+  // pushing the addresses of the strings onto the stack
+  while(i >= 0){
+  	if(i == argc){ // 32-bit zero padding argv[argc]
+  		*esp -= sizeof(zeros);
+  		memcpy(*esp, &zeros, sizeof(int)); //zero-padding
+  	}
+  	else{
+  		*esp -= sizeof(int); // sizeof address
+  		memcpy(*esp, &argv[i], sizeof(int));
+  	}	
+  }
+  
+  // pushing the address of, the last arg. address to the stack
+  int adr = *esp;
+  *esp -= sizeof(int);
+  memcpy(*esp, &adr, sizeof(int));
+  
+  // copying the number of arguments (argc)
+  *esp -= sizeof(int);
+  memcpy(*esp, &argc, sizeof(int));
+  
+  // copying a fake return address (0) to the stack
+  *esp -= sizeof(int);
+  memcpy(*esp, &zeros, sizeof(int));
+  
+  // freeing the variables
+  free(fn_cpy);
+  free(argv);
+  
+  //hex_dump();
   return success;
 }
 
