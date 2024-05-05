@@ -4,9 +4,14 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/syscall.h"
+#include "userprog/pagedir.h"
+#include "threads/vaddr.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
+
+#define MAX_STACK_SIZE 0x800000
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
@@ -147,10 +152,35 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+    
+    struct thread *curr = thread_current(); /* Current thread. */
+    //void* page_fault = (void*) pg_round_down(fault_addr);
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
+    if (!not_present) {    	/* True: not-present page, false: writing r/o page. */
+    	goto PAGE_FAULT_VIOLATED_ACCESS;
+  }
+  
+    void* esp;
+	if (user) { /* True: access by user, false: access by kernel. */
+    		esp = f->esp; /// Stack pointer for user mode
+	} else {
+    		esp = curr->current_esp; /// Stack pointer for kernel mode
+}
+
+  // success
+  return;
+  
+  	
+  PAGE_FAULT_VIOLATED_ACCESS:
+  /* (3.1.5) a page fault in the kernel merely sets eax to 0xffffffff
+   * and copies its former value into eip. see syscall.c:get_user() */
+  if(!user) { // kernel mode
+    f->eip = (void *) f->eax;
+    f->eax = 0xffffffff;
+    return;
+  }
+
+  /* Page fault can't be handled - kill the process */
   printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",

@@ -98,6 +98,8 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
+    uint8_t *current_esp;              /*current stack pointer*/
+    
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };

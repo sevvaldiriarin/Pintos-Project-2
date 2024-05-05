@@ -14,9 +14,11 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "lib/stdlib.h"
 
 #define MAX_ARGS 32
 #define MAX_ARG_LEN 128
@@ -53,7 +55,7 @@ process_execute (const char *file_name)
   char *fname_ext = malloc(strlen(file_name) + 1); 
   strlcpy(fname_ext, file_name, strlen(file_name) + 1);  // to avoid modifying the original
   char *save_ptr;
-  char* fname_ext = strtok_r(fname_ext," ", &save_ptr);
+  fname_ext = strtok_r(fname_ext," ", &save_ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   // tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -250,7 +252,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   char *fname_ext = malloc(strlen(file_name) + 1); 
   strlcpy(fname_ext, file_name, strlen(file_name) + 1);  // to avoid modifying the original
   char *save_ptr;
-  char* fname_ext = strtok_r(fname_ext," ", &save_ptr);
+  fname_ext = strtok_r(fname_ext," ", &save_ptr);
   
   /* Open executable file. */
   // file = filesys_open (file_name); // Have to change it, because we should parse the file name first
