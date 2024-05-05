@@ -79,21 +79,23 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
   
+  /*
   // FOR PARSING THE FILE NAME
   // the same process of parsing in process_execute()
   char *fname_ext = malloc(strlen(file_name) + 1); 
   strlcpy(fname_ext, file_name, strlen(file_name) + 1);  // to avoid modifying the original
   char *save_ptr;
   fname_ext = strtok_r(fname_ext," ", &save_ptr);
+  */
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  // success = load (file_name, &if_.eip, &if_.esp);
-  success = load (fname_ext, &if_.eip, &if_.esp); // NEWLY ADDED
-  free(fname_ext); // NEWLY ADDED
+  success = load (file_name, &if_.eip, &if_.esp);
+  //success = load (fname_ext, &if_.eip, &if_.esp); // NEWLY ADDED
+  //free(fname_ext); // NEWLY ADDED
   
   // SETTING UP THE STACK
   
@@ -545,14 +547,17 @@ setup_stack (void **esp, char * file_name)
   
   int zeros = 0; // defined here, because it's going to be used later
   // pushing the addresses of the strings onto the stack
+  i = argc;
   while(i >= 0){
   	if(i == argc){ // 32-bit zero padding argv[argc]
   		*esp -= sizeof(zeros);
   		memcpy(*esp, &zeros, sizeof(int)); //zero-padding
+  		i--;
   	}
   	else{
   		*esp -= sizeof(int); // sizeof address
   		memcpy(*esp, &argv[i], sizeof(int));
+  		i--;
   	}	
   }
   
