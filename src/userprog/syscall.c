@@ -4,16 +4,24 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+#include <string.h>
 #include <devices/shutdown.h>
+#include <devices/input.h>
 #include <threads/vaddr.h>
+#include <threads/malloc.h>
+#include <threads/palloc.h>
+#include <filesys/file.h>
+#include <filesys/filesys.h>
+#include "process.h"
+#include "pagedir.h"
 
 
 void exit_thread(void);
 void * addr_check(const void *vaddr);  
+bool is_ptruser_valid (void* esp, uint8_t argc);
 
 
-
-static void syscall_handler (struct intr_frame *);
+static void syscall_handler (struct intr_frame *f);
 
 /*Reads a byte at user virtual address UADDR.
    UADDR must be below PHYS_BASE.
@@ -65,7 +73,7 @@ void * addr_check(const void *vaddr){
 	}
 	uint8_t *check = (uint8_t *) vaddr;
 	for(uint8_t i=0; i<4; i++){
-		if(get_user(vaddr) == -1) exit_thread;
+		if(get_user(check +i) == -1) exit_thread();
 	}
 	
 	return tmp;
@@ -77,7 +85,6 @@ syscall_handler (struct intr_frame *f UNUSED)
   int * ptr = f->esp; 
   addr_check(ptr);
   
-  // TO DO: address check
   int syscall_num = * ptr;
   switch (syscall_num)
     {
@@ -98,9 +105,22 @@ syscall_handler (struct intr_frame *f UNUSED)
         break;
 
       case SYS_CREATE:
+        addr_check(ptr+5);
+        addr_check(*(ptr+4));
+        // need to acquire the lock first, to be able to
+        // do a operation on a file
+        fsys_lock_acquire();
+	// store the outcome in the accumulator
+	f->eax = filesys_create(*ptr, *(ptr+1));
+	fsys_lock_release();
         break;
 
-      case SYS_REMOVE:       
+      case SYS_REMOVE:
+        addr_check(ptr+1);
+        addr_check(*(ptr+1));
+        fsys_lock_acquire();
+        f->eax = filesys_remove((const char *)*(ptr+1));
+        fsys_lock_release();   
         break;
 
       case SYS_OPEN:       
@@ -109,7 +129,27 @@ syscall_handler (struct intr_frame *f UNUSED)
       case SYS_FILESIZE:        
         break;
 
-      case SYS_READ:        
+      case SYS_READ:
+        *ptr++;
+        int fd = *ptr;
+        uint8_t * buffer = (uint8_t*)*(ptr+1);
+        off_t size = *(ptr+2);
+        if((!is_ptruser_valid(buffer, 1)) || (!is_ptruser_valid(buffer+size, 1))) exit_thread();
+        
+        // if the FD is = 0, we read from the keyboard using input_getc()
+        if(fd == 0){
+        	for(int i=0; i<size; i++){
+        		buffer[i] = input_getc();
+        	}
+        	f->eax = size;
+        }
+        else{
+        
+        }
+        
+        // if the FD is not 0, we read the file OR can't read the file
+        // due to a condition other than EOF. If that is the case eax -> -1
+         
         break;
 
       case SYS_WRITE:        
@@ -129,4 +169,17 @@ syscall_handler (struct intr_frame *f UNUSED)
         thread_exit ();
         break;
     }
+}
+
+// to check if the user pointer is valid 
+bool 
+is_ptruser_valid (void* esp, uint8_t argc){
+  for (uint8_t i = 0; i < argc; ++i)
+  {
+    if((is_kernel_vaddr (esp)) || 
+      (pagedir_get_page (thread_current()->pagedir, esp)==NULL)){
+      return false;
+    }
+  }
+  return true;
 }

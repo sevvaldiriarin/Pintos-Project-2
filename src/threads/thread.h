@@ -139,6 +139,10 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+// global lock acquire, release functions for project 2
+void fsys_lock_acquire();
+void fsys_lock_release();
+
 void thread_init (void);
 void thread_start (void);
 
