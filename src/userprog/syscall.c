@@ -52,7 +52,7 @@ void exit_thread(void){
 
 // to avoid user programs from reaching invalid addresses
 void * addr_check(const void *vaddr){
-	if(is_kernel_vaddr){
+	if(is_kernel_vaddr(vaddr)){
 		exit_thread();
 	}
 	// looks up the physical addres of vaddr in the current threads
@@ -74,19 +74,21 @@ void * addr_check(const void *vaddr){
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-  int *ptr = f->esp; 
+  int * ptr = f->esp; 
+  addr_check(ptr);
   
   // TO DO: address check
-  
-  switch (*ptr)
+  int syscall_num = * ptr;
+  switch (syscall_num)
     {
       case SYS_HALT:
         shutdown_power_off();
         break;
       
       case SYS_EXIT:  
-      	// pointer check
-      	     
+      	addr_check(ptr+1);
+      	thread_current()->exit_status = (*ptr) +1;
+      	thread_exit();     
         break;
 
       case SYS_EXEC:        
