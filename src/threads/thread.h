@@ -24,6 +24,24 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+struct child
+  {
+    tid_t tid;                           // tid of the thread 
+    bool isrun;                          // to determine if the child's thread is run successfully
+    struct list_elem child_elem;         // list of children
+    struct semaphore sema;               // semaphore to control waiting
+    int exit_child;                      // the exit status of child thread
+  };
+  
+  
+// the file which thread opens
+struct thread_file
+  {
+    int fd;
+    struct file* file;
+    struct list_elem file_elem;
+  };
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -100,6 +118,19 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+    
+    // FOR PROJECT 2
+    struct list children;
+    struct child * child_thread; // to store the child of this thread
+    struct thread* parent;  // the parent of this thread
+    int exit_status;
+    struct semaphore sema;
+    bool success;
+    
+    struct list files;
+    int file_fd; // file descriptor of the file
+    struct file * opened_file;
+    
   };
 
 /* If false (default), use round-robin scheduler.

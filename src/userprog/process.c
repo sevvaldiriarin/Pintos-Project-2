@@ -578,7 +578,7 @@ setup_stack (void **esp, char * file_name)
   free(fn_cpy);
   free(argv);
   
-  //hex_dump();
+  hex_dump(0, *esp, 1000, 1);
   return success;
 }
 

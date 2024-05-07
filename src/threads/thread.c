@@ -463,6 +463,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  
+  // FOR PROJECT 2
+  t->exit_status = UINT32_MAX; // initialized the thread's exit status to max. int possible
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
