@@ -78,13 +78,7 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
-void fsys_lock_acquire(){
-	lock_acquire(&f_lock);
-}
 
-void fsys_lock_release(){
-	lock_release(&f_lock);
-}
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -597,6 +591,14 @@ thread_schedule_tail (struct thread *prev)
       ASSERT (prev != cur);
       palloc_free_page (prev);
     }
+}
+
+void fsys_lock_acquire(void){
+	lock_acquire(&f_lock);
+}
+
+void fsys_lock_release(void){
+	lock_release(&f_lock);
 }
 
 /* Schedules a new process.  At entry, interrupts must be off and

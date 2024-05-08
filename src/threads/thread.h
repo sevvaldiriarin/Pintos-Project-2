@@ -140,8 +140,8 @@ struct thread
 extern bool thread_mlfqs;
 
 // global lock acquire, release functions for project 2
-void fsys_lock_acquire();
-void fsys_lock_release();
+void fsys_lock_acquire(void);
+void fsys_lock_release(void);
 
 void thread_init (void);
 void thread_start (void);
