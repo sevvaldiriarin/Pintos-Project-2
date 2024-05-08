@@ -15,6 +15,9 @@
 #include "userprog/process.h"
 #endif
 
+#include <filesys/file.h>
+#include <threads/malloc.h>
+
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -196,6 +199,11 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+  // FOR PROJECT 2
+  t->child_thread = malloc(sizeof(struct child));
+  t->child_thread->tid = tid;
+  
+  
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;

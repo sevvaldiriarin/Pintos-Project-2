@@ -67,6 +67,11 @@ process_execute (const char *file_name)
   free(fname_ext); // NEWLY ADDED
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+    
+  // we sema down the parent process, who waits for the child
+  sema_down(&thread_current()->sema);
+  if (!thread_current()->success) return TID_ERROR;
+  
   return tid;
 }
 
@@ -93,7 +98,7 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  success = load (file_name, &if_.eip, &if_.esp); // parsing is handled in the load function
   //success = load (fname_ext, &if_.eip, &if_.esp); // NEWLY ADDED
   //free(fname_ext); // NEWLY ADDED
   
@@ -102,8 +107,19 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success){
+    // we store the execute status of the parent thread's success 
+    // and sema up parent's semaphore, to change from the init proc.
+    // to the new process
+    thread_current()->parent->success = false;
+    sema_up(&thread_current()->parent->sema);
     thread_exit ();
+  }
+  // NEWLY ADDED
+  else{
+    thread_current()->parent->success = true;
+    sema_up(&thread_current()->parent->sema);
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -127,7 +143,34 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  /* Find the child's ID that the current thread waits for and sema down the child's semaphore */
+  struct list *l = &thread_current()->children;
+  struct list_elem *tmp;
+  tmp = list_begin (l);
+  struct child *tmp2 = NULL;
+  while (tmp != list_end (l))
+  {
+    tmp2 = list_entry (tmp, struct child, child_elem);
+    if (tmp2->tid == child_tid)
+    {
+      if (!tmp2->isrun)
+      {
+        tmp2->isrun = true;
+        sema_down (&tmp2->sema);
+        break;
+      } 
+      else 
+      {
+        return -1;
+      }
+    }
+    tmp = list_next (tmp);
+  }
+  if (tmp == list_end (l)) {
+    return -1;
+  }
+  list_remove (tmp);
+  return tmp2->exit_child;
 }
 
 /* Free the current process's resources. */
@@ -269,13 +312,17 @@ load (const char *file_name, void (**eip) (void), void **esp)
   fname_ext = strtok_r(fname_ext," ", &save_ptr);
   
   /* Open executable file. */
-  // file = filesys_open (file_name); // Have to change it, because we should parse the file name first
+  fsys_lock_acquire(); 
   file = filesys_open (fname_ext); // NEWLY ADDED
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", fname_ext);
       goto done; 
     }
+    
+  // NEWLY ADDED
+  file_deny_write(file);  // denying write to executables part
+  t->opened_file = file;  // the file who starts? this thread
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -500,83 +547,84 @@ setup_stack (void **esp, char * file_name)
       // Adds a mapping from user virtual address UPAGE to kernel
       // virtual address KPAGE to the page table.
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true); 
-      if (success)
+      if (success){
         *esp = PHYS_BASE;
+        
+        // PARSING THE ARGS AND PUSHING THEM ONTO THE STACK
+	  char* fn_cpy = malloc(strlen(file_name)+1);
+	  strlcpy(fn_cpy, file_name, strlen(file_name)+1);
+	  
+	  char *token, *save_ptr;
+	  int argc, i = 0;
+	  
+	  // first we have to calculate the argc becuase according to the
+	  // PINTOS 80x86 calling converntion, we have to push the arguments
+	  // to the stack from right to left.
+	  for(token = strtok_r(fn_cpy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)){
+	    	argc++;
+	  }
+	  
+	  // pushing the arguments
+	  // we don't have to create a copy of the command line arguments
+	  // because we won't need them again
+	  int *argv = calloc(argc, sizeof(int)); // type int * --> address of the arguments are int
+	  for(token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr), i++){
+	  	*esp -= strlen(token) + 1;
+	  	memcpy(*esp, token, strlen(token) +1); // copying the strings to the stack, order doesn't matter
+	  	argv[i] = *esp; // to access the strings
+	  }
+	  
+	  // to align the stack
+	  while(((int)*esp%4) != 0){
+	  	char x = 0;
+	  	*esp -= sizeof(char);
+	  	memcpy(*esp, &x, sizeof(char)); // zero-padding
+	  }
+	  
+	  /*
+	  // 32-bit zero padding
+	  int padding = 0;
+	  *esp -= sizeof(padding);
+	  memcpy(*esp, &padding, sizeof(int)); // zero-padding
+	  */
+	  
+	  
+	  int zeros = 0; // defined here, because it's going to be used later
+	  // pushing the addresses of the strings onto the stack
+	  i = argc;
+	  while(i >= 0){
+	  	if(i == argc){ // 32-bit zero padding argv[argc]
+	  		*esp -= sizeof(zeros);
+	  		memcpy(*esp, &zeros, sizeof(int)); //zero-padding
+	  		i--;
+	  	}
+	  	else{
+	  		*esp -= sizeof(int); // sizeof address
+	  		memcpy(*esp, &argv[i], sizeof(int));
+	  		i--;
+	  	}	
+	  }
+	  
+	  // pushing the address of, the last arg. address to the stack
+	  int adr = *esp;
+	  *esp -= sizeof(int);
+	  memcpy(*esp, &adr, sizeof(int));
+	  
+	  // copying the number of arguments (argc)
+	  *esp -= sizeof(int);
+	  memcpy(*esp, &argc, sizeof(int));
+	  
+	  // copying a fake return address (0) to the stack
+	  *esp -= sizeof(int);
+	  memcpy(*esp, &zeros, sizeof(int));
+	  
+	  // freeing the variables
+	  free(fn_cpy);
+	  free(argv);
+	}
       else
         palloc_free_page (kpage);
     }
-    
-  // PARSING THE ARGS AND PUSHING THEM ONTO THE STACK
-  char* fn_cpy = malloc(strlen(file_name)+1);
-  strlcpy(fn_cpy, file_name, strlen(file_name)+1);
-  
-  char *token, *save_ptr;
-  int argc, i = 0;
-  
-  // first we have to calculate the argc becuase according to the
-  // PINTOS 80x86 calling converntion, we have to push the arguments
-  // to the stack from right to left.
-  for(token = strtok_r(fn_cpy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)){
-    	argc++;
-  }
-  
-  // pushing the arguments
-  // we don't have to create a copy of the command line arguments
-  // because we won't need them again
-  int *argv = calloc(argc, sizeof(int)); // type int * --> address of the arguments are int
-  for(token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr), i++){
-  	*esp -= strlen(token) + 1;
-  	memcpy(*esp, token, strlen(token) +1); // copying the strings to the stack, order doesn't matter
-  	argv[i] = *esp; // to access the strings
-  }
-  
-  // to align the stack
-  while(((int)*esp%4) != 0){
-  	char x = 0;
-  	*esp -= sizeof(char);
-  	memcpy(*esp, &x, sizeof(char)); // zero-padding
-  }
-  
-  /*
-  // 32-bit zero padding
-  int padding = 0;
-  *esp -= sizeof(padding);
-  memcpy(*esp, &padding, sizeof(int)); // zero-padding
-  */
-  
-  
-  int zeros = 0; // defined here, because it's going to be used later
-  // pushing the addresses of the strings onto the stack
-  i = argc;
-  while(i >= 0){
-  	if(i == argc){ // 32-bit zero padding argv[argc]
-  		*esp -= sizeof(zeros);
-  		memcpy(*esp, &zeros, sizeof(int)); //zero-padding
-  		i--;
-  	}
-  	else{
-  		*esp -= sizeof(int); // sizeof address
-  		memcpy(*esp, &argv[i], sizeof(int));
-  		i--;
-  	}	
-  }
-  
-  // pushing the address of, the last arg. address to the stack
-  int adr = *esp;
-  *esp -= sizeof(int);
-  memcpy(*esp, &adr, sizeof(int));
-  
-  // copying the number of arguments (argc)
-  *esp -= sizeof(int);
-  memcpy(*esp, &argc, sizeof(int));
-  
-  // copying a fake return address (0) to the stack
-  *esp -= sizeof(int);
-  memcpy(*esp, &zeros, sizeof(int));
-  
-  // freeing the variables
-  free(fn_cpy);
-  free(argv);
   
   hex_dump(0, *esp, 1000, 1);
   return success;
