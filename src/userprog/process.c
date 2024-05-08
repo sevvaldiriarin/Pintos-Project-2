@@ -626,7 +626,7 @@ setup_stack (void **esp, char * file_name)
         palloc_free_page (kpage);
     }
   
-  hex_dump(0, *esp, 1000, 1);
+  //hex_dump(0, *esp, 1000, 1);
   return success;
 }
 

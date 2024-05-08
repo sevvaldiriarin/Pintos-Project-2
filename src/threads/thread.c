@@ -202,6 +202,11 @@ thread_create (const char *name, int priority,
   // FOR PROJECT 2
   t->child_thread = malloc(sizeof(struct child));
   t->child_thread->tid = tid;
+  sema_init (&t->child_thread->sema, 0);
+  list_push_back (&thread_current()->children, &t->child_thread->child_elem);
+  
+  t->child_thread->exit_child = UINT32_MAX;
+  t->child_thread->isrun = false;
   
   
   /* Stack frame for kernel_thread(). */
@@ -311,6 +316,20 @@ thread_exit (void)
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
   intr_disable ();
+  
+  struct list_elem *e;
+  struct list *files = &thread_current()->files;
+  
+  while(!list_empty (files)){
+    e = list_pop_front (files); // to get the head of the current threads files list
+    struct thread_file *f = list_entry (e, struct thread_file, file_elem);
+    fsys_lock_acquire();
+    file_close (f->file);  // this must be done with the help of the lock
+    fsys_lock_release();
+    list_remove (e); 
+    free (f);  // for freeing the resources that the file obtained
+  }
+  
   list_remove (&thread_current()->allelem);
   thread_current ()->status = THREAD_DYING;
   schedule ();
@@ -486,6 +505,20 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
   
   // FOR PROJECT 2
+  t->opened_file = NULL;  // the opener of he initial thread (owner of the thread) is NULL
+  t->file_fd = 2;
+  if (t==initial_thread){
+  	t->parent=NULL; // the initial thread has no parent
+  }
+  else{
+   t->parent = thread_current ();
+  }
+  // initializations
+  list_init (&t->children);
+  list_init (&t->files);
+  list_init (&t->files);
+  sema_init (&t->sema, 0);
+  t->success = true;
   t->exit_status = UINT32_MAX; // initialized the thread's exit status to max. int possible
 
   old_level = intr_disable ();
